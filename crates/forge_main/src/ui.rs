@@ -1450,6 +1450,16 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             self.writeln(info)?;
         }
 
+        for pm in &all_provider_models {
+            if let Err(err) = &pm.models {
+                self.writeln_title(TitleFormat::error(format!(
+                    "Failed to fetch models from '{}': {:?}",
+                    pm.provider_id,
+                    err
+                )))?;
+            }
+        }
+
         Ok(())
     }
 
@@ -2830,6 +2840,15 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             all_provider_models.retain(|pm| &pm.provider_id == filter_id);
         }
 
+        for pm in &all_provider_models {
+            if let Err(err) = &pm.models {
+                self.writeln_title(TitleFormat::error(format!(
+                    "Failed to fetch models from '{}': {:?}",
+                    pm.provider_id,
+                    err
+                )))?;
+            }
+        }
         all_provider_models.retain(|pm| pm.models.is_ok());
 
         if all_provider_models.is_empty() {
