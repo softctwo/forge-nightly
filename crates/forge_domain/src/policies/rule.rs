@@ -112,10 +112,7 @@ impl Rule {
     /// [`PolicyEngine`]: crate::PolicyEngine
     pub fn specificity(&self) -> usize {
         fn count_literals(pattern: &str) -> usize {
-            pattern
-                .chars()
-                .filter(|c| !matches!(c, '*' | '?'))
-                .count()
+            pattern.chars().filter(|c| !matches!(c, '*' | '?')).count()
         }
 
         let (primary, dir) = match self {

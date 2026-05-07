@@ -115,7 +115,7 @@ mod tests {
             assert_eq!(policies.policies.len(), 3);
 
             // Test first policy - get first policy from the set
-            let first_policy = policies.policies.iter().next().unwrap();
+            let first_policy = policies.policies.first().unwrap();
             if let Policy::Simple { permission, rule } = first_policy {
                 assert_eq!(permission, &Permission::Allow);
                 if let Rule::Read(rule) = rule {

@@ -179,15 +179,11 @@ mod tests {
     #[test]
     fn test_policy_engine_specific_allow_should_win_over_broad_deny() {
         // policies:
-        //   - permission: allow
-        //     rule:
-        //       read: "**/*"
-        //   - permission: allow
-        //     rule:
-        //       write: "**/*.rs"    // specificity=3 (l: "", "/*/", ".rs")
-        //   - permission: deny
-        //     rule:
-        //       write: "**/*"       // specificity=0 (all wildcards)
+        //   - permission: allow rule: read: "**/*"
+        //   - permission: allow rule: write: "**/*.rs"    // specificity=3 (l: "",
+        //     "/*/", ".rs")
+        //   - permission: deny rule: write: "**/*"       // specificity=0 (all
+        //     wildcards)
         //
         // operation: write "test.rs"
         //   → matches allow "**/*.rs"  (spec=3)
@@ -226,12 +222,8 @@ mod tests {
     #[test]
     fn test_policy_engine_specific_allow_wins_regardless_of_order() {
         // policies:
-        //   - permission: deny
-        //     rule:
-        //       write: "**/*"       // specificity=0
-        //   - permission: allow
-        //     rule:
-        //       write: "**/*.rs"    // specificity=3
+        //   - permission: deny rule: write: "**/*"       // specificity=0
+        //   - permission: allow rule: write: "**/*.rs"    // specificity=3
         //
         // operation: write "test.rs"
         //   → matches deny  "**/*"  (spec=0)
@@ -276,12 +268,9 @@ mod tests {
     #[test]
     fn test_policy_engine_specific_deny_carves_out_exception_in_broad_allow() {
         // policies:
-        //   - permission: allow
-        //     rule:
-        //       write: "**/*.rs"    // specificity=3
-        //   - permission: deny
-        //     rule:
-        //       write: "secret.rs"  // specificity=9 (all literals)
+        //   - permission: allow rule: write: "**/*.rs"    // specificity=3
+        //   - permission: deny rule: write: "secret.rs"  // specificity=9 (all
+        //     literals)
         //
         // operation: write "secret.rs"
         //   → matches allow "**/*.rs" (spec=3)
@@ -324,12 +313,8 @@ mod tests {
     #[test]
     fn test_policy_engine_equal_specificity_prefers_deny() {
         // policies:
-        //   - permission: allow
-        //     rule:
-        //       write: "secret.rs"  // specificity=9
-        //   - permission: deny
-        //     rule:
-        //       write: "secret.rs"  // specificity=9
+        //   - permission: allow rule: write: "secret.rs"  // specificity=9
+        //   - permission: deny rule: write: "secret.rs"  // specificity=9
         //
         // operation: write "secret.rs"
         //   → matches both rules (spec=9 each)
