@@ -351,12 +351,10 @@ mod tests {
         // might consider the shorter one more restrictive.
         //
         // policies:
-        //   - permission: allow
-        //     rule:
-        //       write: "src/**/*.rs"  // specificity=7 ("s","r","c","/","/",".","r","s")
-        //   - permission: deny
-        //     rule:
-        //       write: "*.rs"         // specificity=3 (".","r","s")
+        //   - permission: allow rule: write: "src/**/*.rs"  // specificity=7
+        //     ("s","r","c","/","/",".","r","s")
+        //   - permission: deny rule: write: "*.rs"         // specificity=3
+        //     (".","r","s")
         //
         // operation: write "src/utils/helper.rs"
         //   → matches allow "src/**/*.rs" (spec=7)
