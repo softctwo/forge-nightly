@@ -1766,13 +1766,13 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             "Untrusted MCP config found at {}",
             local_path.display(),
         )));
-        rows.push(SelectRow::header(String::from("Servers:")));
+        rows.push(SelectRow::header("Servers:"));
         for (name, server) in &config.mcp_servers {
             // Show the endpoint (URL for HTTP, command for stdio) so the user
             // can see exactly what will be executed/contacted if they accept.
             rows.push(SelectRow::header(format!(
-                "  - {name}: {endpoint}",
-                endpoint = format_mcp_server(server),
+                "  - {name}: {}",
+                format_mcp_server(server),
             )));
         }
         let header_lines = rows.len();

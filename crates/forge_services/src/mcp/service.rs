@@ -323,7 +323,6 @@ mod tests {
         }
 
         async fn get_mcp_trust_status(&self, _path: &Path) -> anyhow::Result<McpTrustStatus> {
-            // In tests all configs are implicitly trusted
             Ok(McpTrustStatus::Trusted)
         }
 
@@ -332,7 +331,6 @@ mod tests {
         }
 
         async fn filter_trusted(&self, raw: McpConfig) -> anyhow::Result<McpConfig> {
-            // In tests all configs are implicitly trusted
             Ok(raw)
         }
     }

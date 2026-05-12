@@ -229,6 +229,10 @@ pub trait McpConfigManager: Send + Sync {
     ///
     /// Passing `McpTrustStatus::Unknown` clears any previously recorded
     /// decision for the path.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read or the trust store cannot
+    /// be persisted.
     async fn set_mcp_trust(&self, path: &Path, status: McpTrustStatus) -> anyhow::Result<()>;
 
     /// Drops untrusted servers from `raw`.

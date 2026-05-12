@@ -1,6 +1,7 @@
 //!
 //! Follows the design specifications of Claude's [.mcp.json](https://docs.anthropic.com/en/docs/claude-code/tutorials#set-up-model-context-protocol-mcp)
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::path::Path;
@@ -358,9 +359,11 @@ pub struct McpTrustStore {
 }
 
 impl McpTrustStore {
-    /// Derives the JSON-map key for a path.
-    fn key(path: &Path) -> String {
-        path.to_string_lossy().into_owned()
+    /// Derives the JSON-map key for a path. Returns a borrowed `&str` when
+    /// the path is already valid UTF-8, allocating only for paths containing
+    /// non-UTF-8 bytes.
+    fn key(path: &Path) -> Cow<'_, str> {
+        path.to_string_lossy()
     }
 
     /// Returns the trust status for the given path+hash pair.
@@ -369,7 +372,7 @@ impl McpTrustStore {
     /// decision exists but was made against a different content hash (i.e.
     /// the file has been modified since).
     pub fn get_status(&self, path: &Path, content_hash: u64) -> McpTrustStatus {
-        match self.entries.get(&Self::key(path)) {
+        match self.entries.get(Self::key(path).as_ref()) {
             Some(entry) if entry.hash == content_hash => entry.decision.into(),
             _ => McpTrustStatus::Unknown,
         }
@@ -387,12 +390,12 @@ impl McpTrustStore {
 
     /// Clears any trust decision (accepted or rejected) for the given path.
     pub fn clear(&mut self, path: &Path) {
-        self.entries.remove(&Self::key(path));
+        self.entries.remove(Self::key(path).as_ref());
     }
 
     fn insert(&mut self, path: &Path, hash: u64, decision: McpTrustDecision) {
         self.entries
-            .insert(Self::key(path), McpTrustEntry { hash, decision });
+            .insert(Self::key(path).into_owned(), McpTrustEntry { hash, decision });
     }
 }
 
