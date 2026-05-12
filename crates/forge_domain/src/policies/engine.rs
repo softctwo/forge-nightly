@@ -88,6 +88,8 @@ impl<'a> PolicyEngine<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -209,12 +211,13 @@ mod tests {
     fn test_policy_engine_mcp_unmatched_defaults_to_confirm() {
         let fixture_workflow = PolicyConfig::new().add_policy(Policy::Simple {
             permission: Permission::Allow,
-            rule: Rule::Mcp(McpRule { mcp: "github".to_string(), scope: None }),
+            rule: Rule::Mcp(McpRule { mcp: "github".to_string(), scope: None, dir: None }),
         });
         let fixture = PolicyEngine::new(&fixture_workflow);
         let operation = PermissionOperation::Mcp {
             server: "slack".to_string(),
             scope: Scope::Local,
+            cwd: PathBuf::from("/home/user/project"),
             message: "Execute MCP tool: mcp_slack_tool_send".to_string(),
         };
 
@@ -227,12 +230,13 @@ mod tests {
     fn test_policy_engine_mcp_matching_glob_allows() {
         let fixture_workflow = PolicyConfig::new().add_policy(Policy::Simple {
             permission: Permission::Allow,
-            rule: Rule::Mcp(McpRule { mcp: "git*".to_string(), scope: None }),
+            rule: Rule::Mcp(McpRule { mcp: "git*".to_string(), scope: None, dir: None }),
         });
         let fixture = PolicyEngine::new(&fixture_workflow);
         let operation = PermissionOperation::Mcp {
             server: "github".to_string(),
             scope: Scope::Local,
+            cwd: PathBuf::from("/home/user/project"),
             message: "Execute MCP tool: mcp_github_tool_create_issue".to_string(),
         };
 
@@ -249,12 +253,14 @@ mod tests {
             rule: Rule::Mcp(McpRule {
                 mcp: "*".to_string(),
                 scope: Some(Scope::User),
+                dir: None,
             }),
         });
         let fixture = PolicyEngine::new(&fixture_workflow);
         let operation = PermissionOperation::Mcp {
             server: "github".to_string(),
             scope: Scope::Local,
+            cwd: PathBuf::from("/home/user/project"),
             message: "Execute MCP tool: mcp_github_tool_create_issue".to_string(),
         };
 

@@ -35,6 +35,8 @@ pub enum PermissionOperation {
         /// differentiate user-level (global) trust from project-local
         /// trust.
         scope: Scope,
+        /// The current working directory at the time of the operation.
+        cwd: PathBuf,
         message: String,
     },
 }

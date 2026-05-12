@@ -41,11 +41,14 @@ pub struct Fetch {
 }
 
 /// Rule for MCP server connection authorization matched by server-name glob,
-/// optionally narrowed to one config scope.
+/// optionally narrowed to one config scope and directory.
 ///
 /// When `scope` is omitted the rule applies to servers from either the
 /// user-level or local `.mcp.json`; specifying `user` or `local` restricts
 /// the rule to that scope only.
+///
+/// When `dir` is omitted the rule applies regardless of working directory;
+/// specifying a glob pattern restricts the rule to matching directories.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct McpRule {
     /// Glob over the MCP server name as it appears in `.mcp.json`.
@@ -53,6 +56,9 @@ pub struct McpRule {
     /// Optional config-scope filter. `None` matches any scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<Scope>,
+    /// Optional working directory glob pattern. `None` matches any directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }
 
 /// Rules that define what operations are covered by a policy
@@ -112,9 +118,15 @@ impl Rule {
                 };
                 url_matches && dir_matches
             }
-            (Rule::Mcp(rule), PermissionOperation::Mcp { server, scope, message: _ }) => {
+            (Rule::Mcp(rule), PermissionOperation::Mcp { server, scope, cwd, message: _ }) => {
                 let scope_matches = rule.scope.is_none_or(|s| s == *scope);
-                scope_matches && match_pattern(&rule.mcp, server)
+                let server_matches = match_pattern(&rule.mcp, server);
+                let dir_matches = match &rule.dir {
+                    Some(wd_pattern) => match_pattern(wd_pattern, cwd),
+                    None => true, /* If no working directory pattern is specified, it matches any
+                                   * directory */
+                };
+                scope_matches && server_matches && dir_matches
             }
             _ => false,
         }
@@ -174,10 +186,15 @@ impl Display for Fetch {
 
 impl Display for McpRule {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self.scope {
-            Some(Scope::User) => write!(f, "mcp server '{}' (user scope)", self.mcp),
-            Some(Scope::Local) => write!(f, "mcp server '{}' (local scope)", self.mcp),
-            None => write!(f, "mcp server '{}'", self.mcp),
+        let base = match self.scope {
+            Some(Scope::User) => format!("mcp server '{}' (user scope)", self.mcp),
+            Some(Scope::Local) => format!("mcp server '{}' (local scope)", self.mcp),
+            None => format!("mcp server '{}'", self.mcp),
+        };
+        if let Some(wd) = &self.dir {
+            write!(f, "{} in '{}'", base, wd)
+        } else {
+            write!(f, "{}", base)
         }
     }
 }
@@ -245,6 +262,7 @@ mod tests {
         PermissionOperation::Mcp {
             server: "github".to_string(),
             scope: Scope::Local,
+            cwd: PathBuf::from("/home/user/project"),
             message: "Execute MCP tool: mcp_github_tool_create_issue".to_string(),
         }
     }
@@ -369,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_mcp_rule_exact_match() {
-        let fixture = Rule::Mcp(McpRule { mcp: "github".to_string(), scope: None });
+        let fixture = Rule::Mcp(McpRule { mcp: "github".to_string(), scope: None, dir: None });
         let operation = fixture_mcp_operation();
 
         let actual = fixture.matches(&operation);
@@ -379,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_mcp_rule_glob_wildcard() {
-        let fixture = Rule::Mcp(McpRule { mcp: "git*".to_string(), scope: None });
+        let fixture = Rule::Mcp(McpRule { mcp: "git*".to_string(), scope: None, dir: None });
         let operation = fixture_mcp_operation();
 
         let actual = fixture.matches(&operation);
@@ -389,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_mcp_rule_does_not_match_other_server() {
-        let fixture = Rule::Mcp(McpRule { mcp: "slack".to_string(), scope: None });
+        let fixture = Rule::Mcp(McpRule { mcp: "slack".to_string(), scope: None, dir: None });
         let operation = fixture_mcp_operation();
 
         let actual = fixture.matches(&operation);
@@ -399,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_mcp_rule_does_not_match_non_mcp_operation() {
-        let fixture = Rule::Mcp(McpRule { mcp: "*".to_string(), scope: None });
+        let fixture = Rule::Mcp(McpRule { mcp: "*".to_string(), scope: None, dir: None });
         let operation = fixture_execute_operation();
 
         let actual = fixture.matches(&operation);
@@ -410,7 +428,7 @@ mod tests {
     #[test]
     fn test_mcp_rule_scope_matches_local() {
         let fixture =
-            Rule::Mcp(McpRule { mcp: "*".to_string(), scope: Some(Scope::Local) });
+            Rule::Mcp(McpRule { mcp: "*".to_string(), scope: Some(Scope::Local), dir: None });
         let operation = fixture_mcp_operation();
 
         let actual = fixture.matches(&operation);
@@ -421,7 +439,73 @@ mod tests {
     #[test]
     fn test_mcp_rule_scope_filters_out_user() {
         let fixture =
-            Rule::Mcp(McpRule { mcp: "*".to_string(), scope: Some(Scope::User) });
+            Rule::Mcp(McpRule { mcp: "*".to_string(), scope: Some(Scope::User), dir: None });
+        let operation = fixture_mcp_operation();
+
+        let actual = fixture.matches(&operation);
+
+        assert_eq!(actual, false);
+    }
+
+    #[test]
+    fn test_mcp_rule_dir_pattern_matches() {
+        let fixture = Rule::Mcp(McpRule {
+            mcp: "*".to_string(),
+            scope: None,
+            dir: Some("/home/user/*".to_string()),
+        });
+        let operation = fixture_mcp_operation();
+
+        let actual = fixture.matches(&operation);
+
+        assert_eq!(actual, true);
+    }
+
+    #[test]
+    fn test_mcp_rule_dir_pattern_no_match() {
+        let fixture = Rule::Mcp(McpRule {
+            mcp: "*".to_string(),
+            scope: None,
+            dir: Some("/different/path/*".to_string()),
+        });
+        let operation = fixture_mcp_operation();
+
+        let actual = fixture.matches(&operation);
+
+        assert_eq!(actual, false);
+    }
+
+    #[test]
+    fn test_mcp_rule_no_dir_pattern_matches_any() {
+        let fixture = Rule::Mcp(McpRule { mcp: "github".to_string(), scope: None, dir: None });
+        let operation = fixture_mcp_operation();
+
+        let actual = fixture.matches(&operation);
+
+        assert_eq!(actual, true);
+    }
+
+    #[test]
+    fn test_mcp_rule_combined_scope_and_dir() {
+        let fixture = Rule::Mcp(McpRule {
+            mcp: "github".to_string(),
+            scope: Some(Scope::Local),
+            dir: Some("/home/user/*".to_string()),
+        });
+        let operation = fixture_mcp_operation();
+
+        let actual = fixture.matches(&operation);
+
+        assert_eq!(actual, true);
+    }
+
+    #[test]
+    fn test_mcp_rule_combined_scope_and_dir_mismatch() {
+        let fixture = Rule::Mcp(McpRule {
+            mcp: "github".to_string(),
+            scope: Some(Scope::Local),
+            dir: Some("/different/*".to_string()),
+        });
         let operation = fixture_mcp_operation();
 
         let actual = fixture.matches(&operation);

@@ -203,6 +203,7 @@ where
 
         // Sequential: prompts require user input and must not hold any lock
         // while awaiting a response.
+        let cwd = self.infra.get_environment().cwd;
         for (scope, cfg) in scoped {
             for (name, server) in &cfg.mcp_servers {
                 if server.is_disabled() || !visited.insert(name.clone()) {
@@ -211,6 +212,7 @@ where
                 let operation = PermissionOperation::Mcp {
                     server: name.to_string(),
                     scope,
+                    cwd: cwd.clone(),
                     message: format!("Connect to MCP server: {name}"),
                 };
                 match self.policy.check_operation_permission(&operation).await {
