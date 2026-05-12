@@ -394,8 +394,10 @@ impl McpTrustStore {
     }
 
     fn insert(&mut self, path: &Path, hash: u64, decision: McpTrustDecision) {
-        self.entries
-            .insert(Self::key(path).into_owned(), McpTrustEntry { hash, decision });
+        self.entries.insert(
+            Self::key(path).into_owned(),
+            McpTrustEntry { hash, decision },
+        );
     }
 }
 
