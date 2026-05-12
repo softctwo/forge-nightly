@@ -1778,7 +1778,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         // user is not silently prompted again on the next run.
         let decision = match self.select_raw_row(
             &format!(
-                "Untrusted MCP config at '{}', Do you want to trust following servers?",
+                "Untrusted MCP config at '{}' — do you want to trust the following servers?",
                 local_path.display()
             ),
             None,
