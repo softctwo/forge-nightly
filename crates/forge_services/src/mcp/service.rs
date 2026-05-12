@@ -476,6 +476,13 @@ mod tests {
         ) -> anyhow::Result<PolicyDecision> {
             Ok(PolicyDecision { allowed: true, path: None })
         }
+
+        async fn allow_operation(
+            &self,
+            _operation: &PermissionOperation,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     // ── Fixture ──────────────────────────────────────────────────────────────
