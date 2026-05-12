@@ -233,14 +233,14 @@ where
     C: From<<I as McpServerInfra>::Client>,
 {
     async fn get_mcp_servers(&self) -> anyhow::Result<McpServers> {
-        // Read current configs to compute merged hash
-        let mcp_config = self.manager.read_mcp_config(None).await?;
+        // Filter the merged config so only trusted servers remain. Using the
+        // *filtered* config's hash as the cache key ensures that a cache entry
+        // populated before a rejection cannot leak rejected tools into later
+        // requests.
+        let raw_config = self.manager.read_mcp_config(None).await?;
+        let trusted_config = self.manager.filter_trusted(raw_config).await?;
+        let config_hash = trusted_config.cache_key();
 
-        // Compute unified hash from merged config
-        let config_hash = mcp_config.cache_key();
-
-        // Check if cache is valid (exists and not expired)
-        // Cache is valid, retrieve it
         if let Some(cache) = self.infra.cache_get::<_, McpServers>(&config_hash).await? {
             return Ok(cache.clone());
         }
@@ -262,12 +262,13 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::Path;
     use std::sync::Arc;
 
     use fake::{Fake, Faker};
     use forge_app::domain::{
-        ConfigOperation, Environment, McpConfig, McpServerConfig, Scope, ServerName, ToolCallFull,
-        ToolDefinition, ToolName, ToolOutput,
+        ConfigOperation, Environment, McpConfig, McpServerConfig, McpTrustStatus, Scope,
+        ServerName, ToolCallFull, ToolDefinition, ToolName, ToolOutput,
     };
     use forge_app::{
         EnvironmentInfra, KVStore, McpClientInfra, McpConfigManager, McpServerInfra, McpService,
@@ -319,6 +320,20 @@ mod tests {
             _scope: &Scope,
         ) -> anyhow::Result<()> {
             Ok(())
+        }
+
+        async fn get_mcp_trust_status(&self, _path: &Path) -> anyhow::Result<McpTrustStatus> {
+            // In tests all configs are implicitly trusted
+            Ok(McpTrustStatus::Trusted)
+        }
+
+        async fn set_mcp_trust(&self, _path: &Path, _status: McpTrustStatus) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn filter_trusted(&self, raw: McpConfig) -> anyhow::Result<McpConfig> {
+            // In tests all configs are implicitly trusted
+            Ok(raw)
         }
     }
 
