@@ -1761,11 +1761,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         // Render the server list as header rows so it stays visible above the
         // Accept/Reject options regardless of terminal height.
-        let mut rows = Vec::with_capacity(config.mcp_servers.len() + 4);
-        rows.push(SelectRow::header(format!(
-            "Untrusted MCP config found at {}",
-            local_path.display(),
-        )));
+        let mut rows = Vec::with_capacity(config.mcp_servers.len() + 2);
         rows.push(SelectRow::header("Servers:"));
         for (name, server) in &config.mcp_servers {
             // Show the endpoint (URL for HTTP, command for stdio) so the user
@@ -1782,7 +1778,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         // A missing selection (Esc / cancel) is treated as a rejection so the
         // user is not silently prompted again on the next run.
         let decision = match self.select_raw_row(
-            "Do you want to trust these servers?",
+            &format!(
+                "Untrusted MCP config at {} - trust these servers?",
+                local_path.display()
+            ),
             None,
             rows,
             header_lines,
