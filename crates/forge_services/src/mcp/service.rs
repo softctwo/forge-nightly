@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use forge_app::domain::{
-    McpConfig, McpServerConfig, McpServers, PermissionOperation, Scope, ServerName, ToolCallFull,
-    ToolDefinition, ToolName, ToolOutput,
+    McpConfig, McpPermissionWarning, McpServerConfig, McpServers, PermissionOperation, Scope,
+    ServerName, ToolCallFull, ToolDefinition, ToolName, ToolOutput,
 };
 use forge_app::{
     EnvironmentInfra, KVStore, McpClientInfra, McpConfigManager, McpServerInfra, McpService,
@@ -105,7 +105,7 @@ where
         Ok(())
     }
 
-    async fn init_mcp(&self) -> anyhow::Result<()> {
+    async fn init_mcp(&self) -> anyhow::Result<Vec<McpPermissionWarning>> {
         let user_cfg = self.manager.read_mcp_config(Some(&Scope::User)).await?;
         let local_cfg = self.manager.read_mcp_config(Some(&Scope::Local)).await?;
         let mut merged = user_cfg.clone();
@@ -114,7 +114,7 @@ where
         // Fast path: if config is unchanged, skip reinitialization without acquiring
         // the lock
         if !self.is_config_modified(&merged).await {
-            return Ok(());
+            return Ok(vec![]);
         }
 
         // Serialise concurrent initialisations so only one caller runs update_mcp at a
@@ -123,7 +123,7 @@ where
 
         // Double-check under the lock: a concurrent caller may have already updated
         if !self.is_config_modified(&merged).await {
-            return Ok(());
+            return Ok(vec![]);
         }
 
         self.update_mcp(user_cfg, local_cfg, merged).await
@@ -134,7 +134,7 @@ where
         user_cfg: McpConfig,
         local_cfg: McpConfig,
         merged: McpConfig,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<McpPermissionWarning>> {
         // Compute the hash early before `merged` is consumed, but write it only
         // after all connections are established so waiters on init_lock see a
         // consistent state.
@@ -148,7 +148,7 @@ where
         // first because they shadow user entries of the same name in the
         // merged config; the `visited` set prevents prompting twice for a
         // duplicated name.
-        let authorized: HashSet<ServerName> = self
+        let (authorized, warnings) = self
             .authorize_servers([(Scope::Local, &local_cfg), (Scope::User, &user_cfg)])
             .await?;
 
@@ -183,27 +183,26 @@ where
         // populated, preventing "Tool not found" races.
         *self.previous_config_hash.lock().await = new_hash;
 
-        Ok(())
+        Ok(warnings)
     }
 
     /// Runs the permission policy against every enabled server in each
-    /// `(scope, config)` pair, returning the set of names the user
-    /// authorised. Scopes are processed in iteration order; a server name
-    /// already seen in an earlier scope is skipped so duplicates (e.g. a
-    /// local entry overriding a user one) prompt only for the authoritative
-    /// scope. Denials — from a `Deny` policy or interactive rejection —
-    /// are recorded in `failed_servers` with a human-readable reason.
+    /// `(scope, config)` pair without prompting the user. Returns the set of
+    /// authorised server names and a list of typed warnings for every server
+    /// that was denied by policy. Denials are also recorded in
+    /// `failed_servers`. Scopes are processed in iteration order; a server
+    /// name already seen in an earlier scope is skipped so the authoritative
+    /// scope is used when the same name appears in both configs.
     async fn authorize_servers<'a>(
         &self,
         scoped: impl IntoIterator<Item = (Scope, &'a McpConfig)>,
-    ) -> anyhow::Result<HashSet<ServerName>> {
+    ) -> anyhow::Result<(HashSet<ServerName>, Vec<McpPermissionWarning>)> {
         let mut authorized = HashSet::new();
         let mut visited: HashSet<ServerName> = HashSet::new();
         let mut denied: Vec<(ServerName, String)> = Vec::new();
+        let mut warnings: Vec<McpPermissionWarning> = Vec::new();
 
-        // Sequential: prompts require user input and must not hold any lock
-        // while awaiting a response.
-        let cwd = self.infra.get_environment().cwd;
+        let env = self.infra.get_environment();
         for (_scope, cfg) in scoped {
             for (name, server) in &cfg.mcp_servers {
                 if server.is_disabled() || !visited.insert(name.clone()) {
@@ -211,15 +210,16 @@ where
                 }
                 let operation = PermissionOperation::Mcp {
                     config: server.clone(),
-                    cwd: cwd.clone(),
+                    cwd: env.cwd.clone(),
                     message: format!("Connect to MCP server: {name}"),
                 };
-                match self.policy.check_operation_permission(&operation).await {
-                    Ok(decision) if decision.allowed => {
+                match self.policy.is_operation_permitted(&operation).await {
+                    Ok(true) => {
                         authorized.insert(name.clone());
                     }
-                    Ok(_) => {
-                        denied.push((name.clone(), "Connection denied by user policy".to_string()));
+                    Ok(false) => {
+                        denied.push((name.clone(), "Connection denied by policy".to_string()));
+                        warnings.push(McpPermissionWarning { server_name: name.clone() });
                     }
                     Err(err) => {
                         denied.push((name.clone(), format!("Policy check failed: {err:?}")));
@@ -235,11 +235,11 @@ where
             }
         }
 
-        Ok(authorized)
+        Ok((authorized, warnings))
     }
 
     async fn list(&self) -> anyhow::Result<McpServers> {
-        self.init_mcp().await?;
+        let warnings = self.init_mcp().await?;
 
         let tools = self.tools.read().await;
         let mut grouped_tools = std::collections::HashMap::new();
@@ -253,7 +253,7 @@ where
 
         let failures = self.failed_servers.read().await.clone();
 
-        Ok(McpServers::new(grouped_tools, failures))
+        Ok(McpServers::new(grouped_tools, failures).warnings(warnings))
     }
     async fn clear_tools(&self) {
         self.tools.write().await.clear()

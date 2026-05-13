@@ -132,6 +132,26 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         self.spinner.ewrite_ln(title)
     }
 
+    /// Initialises MCP connections and displays a single warning that lists
+    /// every server blocked by the default permission policy.
+    async fn load_tools(&mut self) -> anyhow::Result<()> {
+        if let Ok(tools) = self.api.get_tools().await {
+            let warnings = tools.mcp.get_warnings();
+            if !warnings.is_empty() {
+                let server_list = warnings
+                    .iter()
+                    .map(|w| format!("    - {}", w.server_name))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                self.writeln_title(TitleFormat::warning(format!(
+                    "Some MCP servers are not allowed to execute by default. \
+                To enable them, add matching rules in permissions.yaml.\n{server_list}",
+                )))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Helper to get provider for an optional agent, defaulting to the current
     /// active agent's provider
     async fn get_provider(&self, agent_id: Option<AgentId>) -> Result<Provider<Url>> {
@@ -223,9 +243,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         self.display_banner()?;
         self.trace_user();
         self.hydrate_caches();
-        // Resolve MCP trust prompts up front — see the note on
-        // `hydrate_caches` for why `get_tools` must not be spawned.
-        let _ = self.api.get_tools().await;
+        // Resolve MCP connections up front and surface any permission
+        // warnings before control returns to the caller.
+        self.load_tools().await?;
         Ok(())
     }
 
@@ -371,11 +391,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         self.hydrate_caches();
         self.init_conversation().await?;
 
-        // Resolve any pending MCP trust prompts before the REPL takes over
-        // stdin. `get_tools` is the entry point that triggers MCP server
-        // authorisation; awaiting it here ensures every `Permission::Confirm`
-        // dialog is answered while the main task still owns the terminal.
-        let _ = self.api.get_tools().await;
+        // Initialise MCP connections and display any permission warnings
+        // before the REPL takes over stdin.
+        self.load_tools().await?;
 
         // Check for dispatch flag first
         if let Some(dispatch_json) = self.cli.event.clone() {

@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ServerName, ToolDefinition};
 
+/// Describes a single MCP server whose connection was blocked by the default
+/// permission policy.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpPermissionWarning {
+    /// Name of the server as declared in the config file.
+    pub server_name: ServerName,
+}
+
 /// Cache for MCP tool definitions
 ///
 /// Simplified cache structure that stores only the essential data.
@@ -18,6 +26,10 @@ pub struct McpServers {
     /// Failed MCP servers with their error messages
     #[serde(default)]
     failures: HashMap<ServerName, String>,
+    /// Servers that were denied by the permission policy, one entry per
+    /// blocked server. The UI uses these to emit a structured warning.
+    #[serde(default)]
+    warnings: Vec<McpPermissionWarning>,
 }
 
 impl McpServers {
@@ -26,7 +38,7 @@ impl McpServers {
         servers: HashMap<ServerName, Vec<ToolDefinition>>,
         failures: HashMap<ServerName, String>,
     ) -> Self {
-        Self { servers, failures }
+        Self { servers, failures, warnings: Vec::new() }
     }
 
     /// Get the successful servers
@@ -37,6 +49,11 @@ impl McpServers {
     /// Get the failed servers
     pub fn get_failures(&self) -> &HashMap<ServerName, String> {
         &self.failures
+    }
+
+    /// Get the permission-denied warnings, one entry per blocked server
+    pub fn get_warnings(&self) -> &[McpPermissionWarning] {
+        &self.warnings
     }
 }
 
