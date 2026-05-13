@@ -148,7 +148,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                         "https://forgecode.dev/docs/permissions/",
                     )
                     .items("Blocked servers:", server_names, 3);
-                self.writeln_title(TitleFormat::warning("MCP servers are disabled by default."))?;
+                self.writeln_title(TitleFormat::warning("Local scope MCP servers are disabled by default."))?;
                 self.writeln(warning.to_string())?;
             }
         }
