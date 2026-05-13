@@ -145,7 +145,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                     .map(|w| w.server_name.to_string())
                     .collect();
                 let warning = PolicyNotice::new()
-                    .row("Configure permissions:", tilde_path(&permissions_path))
+                    .row("To enable them, configure", tilde_path(&permissions_path))
                     .items("Blocked servers:", server_names, 3)
                     .docs("https://forgecode.dev/docs/permissions/");
                 self.writeln_title(TitleFormat::warning(

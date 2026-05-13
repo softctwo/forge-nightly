@@ -5,7 +5,8 @@ use colored::Colorize;
 
 /// A single row rendered inside a [`PolicyNotice`].
 enum Row {
-    /// A bold label followed by a plain value on the same line.
+    /// A bold label followed by a plain value on the same line. If `value` is
+    /// empty the label is rendered alone.
     KeyValue { label: String, value: String },
     /// A bold label followed by a comma-separated, truncated item list.
     Items { label: String, items: Vec<String>, max_display: usize },
@@ -14,6 +15,9 @@ enum Row {
 impl Row {
     fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Row::KeyValue { label, value } if value.is_empty() => {
+                write!(f, "  {}", label.bold())
+            }
             Row::KeyValue { label, value } => {
                 write!(f, "  {} {value}", label.bold())
             }
@@ -37,13 +41,20 @@ impl Row {
 
 /// A composable terminal notice for policy-blocked items.
 ///
-/// Build up any combination of key-value rows and truncated item-list rows,
-/// then optionally attach a docs hyperlink. The `Display` impl renders each
-/// row indented, with bold labels and a dimmed docs line at the end.
+/// Build up any combination of key-value rows, plain text rows, and truncated
+/// item-list rows, then optionally attach a dimmed docs hyperlink at the end.
+/// The `Display` impl renders each row indented with bold labels.
 ///
 /// # Example
 ///
 /// ```rust,ignore
+/// let notice = PolicyNotice::new()
+///     .row("To enable them, configure", tilde_path(&permissions_path))
+///     .row("See docs for permission examples:", "")
+///     .text("https://forgecode.dev/docs/permissions/")
+///     .items("Blocked servers:", server_names, 3);
+///
+/// // Or use the built-in docs hyperlink:
 /// let notice = PolicyNotice::new()
 ///     .row("Configure permissions:", tilde_path(&permissions_path))
 ///     .items("Blocked servers:", server_names, 3)
@@ -52,7 +63,7 @@ impl Row {
 #[derive(Default)]
 pub struct PolicyNotice {
     rows: Vec<Row>,
-    docs_url: Option<String>,
+    docs: Option<String>,
 }
 
 impl PolicyNotice {
@@ -61,7 +72,8 @@ impl PolicyNotice {
         Self::default()
     }
 
-    /// Appends a bold-label + plain-value row.
+    /// Appends a bold-label + plain-value row. Pass an empty string as `value`
+    /// to render the label alone (e.g. as a section header).
     pub fn row(mut self, label: impl Into<String>, value: impl Into<String>) -> Self {
         self.rows.push(Row::KeyValue { label: label.into(), value: value.into() });
         self
@@ -74,14 +86,13 @@ impl PolicyNotice {
         items: Vec<String>,
         max_display: usize,
     ) -> Self {
-        self.rows
-            .push(Row::Items { label: label.into(), items, max_display });
+        self.rows.push(Row::Items { label: label.into(), items, max_display });
         self
     }
 
-    /// Attaches a dimmed OSC 8 docs hyperlink rendered as the last line.
+    /// Attaches a dimmed OSC 8 clickable hyperlink rendered as the last line.
     pub fn docs(mut self, url: impl Into<String>) -> Self {
-        self.docs_url = Some(url.into());
+        self.docs = Some(url.into());
         self
     }
 }
@@ -96,7 +107,7 @@ impl fmt::Display for PolicyNotice {
             row.render(f)?;
             first = false;
         }
-        if let Some(url) = &self.docs_url {
+        if let Some(url) = &self.docs {
             let link = format!("\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\");
             if !first {
                 writeln!(f)?;
