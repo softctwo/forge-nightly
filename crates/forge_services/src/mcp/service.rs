@@ -327,10 +327,11 @@ where
     P: PolicyService + 'static,
 {
     async fn get_mcp_servers(&self) -> anyhow::Result<McpServers> {
-        // Read current configs to compute merged hash
         let user_cfg = self.manager.read_mcp_config(Some(&Scope::User)).await?;
         let local_cfg = self.manager.read_mcp_config(Some(&Scope::Local)).await?;
-        let config_hash = user_cfg.cache_key();
+        let mut merged_cfg = user_cfg.clone();
+        merged_cfg.merge(local_cfg.clone());
+        let config_hash = merged_cfg.cache_key();
 
         // Skip the cache if any servers require permission confirmation.
         // Local-scoped servers always require permission re-verification.
