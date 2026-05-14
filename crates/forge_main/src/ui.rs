@@ -133,10 +133,6 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     /// Initialises MCP connections.
-    async fn load_tools(&mut self) -> anyhow::Result<()> {
-        self.api.get_tools().await.ok();
-        Ok(())
-    }
 
     /// Helper to get provider for an optional agent, defaulting to the current
     /// active agent's provider
@@ -231,7 +227,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         self.hydrate_caches();
         // Resolve MCP connections up front and surface any permission
         // warnings before control returns to the caller.
-        self.load_tools().await?;
+        let _ = self.api.get_tools().await;
         Ok(())
     }
 
@@ -379,7 +375,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         // Initialise MCP connections and display any permission warnings
         // before the REPL takes over stdin.
-        self.load_tools().await?;
+        let _ = self.api.get_tools().await;
 
         // Check for dispatch flag first
         if let Some(dispatch_json) = self.cli.event.clone() {
