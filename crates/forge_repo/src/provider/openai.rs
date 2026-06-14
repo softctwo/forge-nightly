@@ -26,9 +26,7 @@ fn enhance_error(error: anyhow::Error, provider_id: &ProviderId) -> anyhow::Erro
     if status == Some(401) || status == Some(403) {
         let provider_name = provider_id.to_string();
         let action = if status == Some(401) {
-            format!(
-                "Your {provider_name} API key is invalid. Update it in settings and try again."
-            )
+            format!("Your {provider_name} API key is invalid. Update it in settings and try again.")
         } else {
             format!(
                 "Your {provider_name} API key does not have permission to access this resource. Check your account permissions."
