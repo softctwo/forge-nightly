@@ -3860,6 +3860,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
     async fn on_message(&mut self, content: Option<String>) -> Result<()> {
         let conversation_id = self.init_conversation().await?;
+        tracker::begin_trace(Some(conversation_id.into_string())).await;
 
         if self.config.auto_install_vscode_extension {
             self.install_vscode_extension();
@@ -3898,7 +3899,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         // Create the chat request with the event
         let chat = ChatRequest::new(event, conversation_id);
 
-        self.on_chat(chat).await
+        let result = self.on_chat(chat).await;
+        tracker::end_trace().await;
+        result
     }
 
     async fn on_chat(&mut self, chat: ChatRequest) -> Result<()> {

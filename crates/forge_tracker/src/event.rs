@@ -24,6 +24,29 @@ pub struct Event {
     pub model: Option<String>,
     pub conversation: Option<Conversation>,
     pub identity: Option<Identity>,
+    /// PostHog AI Observability: unique ID linking all events in one trace (e.g., one LLM conversation turn).
+    /// Maps to the `$ai_trace_id` property in the PostHog payload.
+    pub trace_id: Option<String>,
+    /// PostHog AI Observability: groups multiple traces into a session (e.g., an entire chat session).
+    /// Maps to the `$ai_session_id` property in the PostHog payload.
+    pub session_id: Option<String>,
+    /// PostHog AI Observability: unique span ID for this event within a trace.
+    /// Maps to the `$ai_span_id` property in the PostHog payload.
+    /// Generated per generation, reused by child spans.
+    pub ai_span_id: Option<String>,
+    /// PostHog AI Observability: span ID of the parent generation for tool calls.
+    /// Maps to the `$ai_parent_id` property in the PostHog payload.
+    pub ai_parent_id: Option<String>,
+    /// LLM provider (e.g. "anthropic", "openai"). Maps to `$ai_provider`.
+    pub provider: Option<String>,
+    /// LLM input token count. Maps to `$ai_input_tokens`.
+    pub ai_input_tokens: Option<u64>,
+    /// LLM output token count. Maps to `$ai_output_tokens`.
+    pub ai_output_tokens: Option<u64>,
+    /// Total token count. Maps to `$ai_total_tokens`.
+    pub ai_total_tokens: Option<u64>,
+    /// LLM response latency in seconds. Maps to `$ai_latency`.
+    pub ai_latency: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -9,6 +9,7 @@ use forge_domain::Conversation;
 use sysinfo::System;
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use super::Result;
 use crate::can_track::can_track;
@@ -66,13 +67,26 @@ pub struct Tracker {
     email: Arc<Mutex<Option<Vec<String>>>>,
     model: Arc<Mutex<Option<String>>>,
     conversation: Arc<Mutex<Option<Conversation>>>,
+    /// Session ID for the current conversation turn.  Maps to `$ai_session_id`
+    /// in the PostHog payload.  Set via [`begin_trace`](Tracker::begin_trace)
+    /// and cleared via [`end_trace`](Tracker::end_trace).
+    session_id: Arc<Mutex<Option<String>>>,
+    /// Trace ID shared across all events within a single conversation turn.
+    /// Set via [`begin_trace`](Tracker::begin_trace) and cleared via
+    /// [`end_trace`](Tracker::end_trace). When absent, each [`dispatch`]
+    /// call generates its own trace ID.
+    trace_id: Arc<Mutex<Option<String>>>,
+    /// Span ID of the most recent AI generation, used as `$ai_parent_id` for
+    /// subsequent tool-call spans so they appear nested under the generation
+    /// in PostHog AI Observability.
+    generation_span_id: Arc<Mutex<Option<String>>>,
     is_logged_in: Arc<AtomicBool>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
 }
 
 impl Default for Tracker {
     fn default() -> Self {
-        let posthog_tracker = Box::new(posthog::Tracker::new(POSTHOG_API_SECRET));
+        let posthog_tracker = Box::new(posthog::Tracker::new(POSTHOG_API_SECRET.to_string()));
         let start_time = Utc::now();
         let can_track = can_track();
         Self {
@@ -82,6 +96,9 @@ impl Default for Tracker {
             email: Arc::new(Mutex::new(None)),
             model: Arc::new(Mutex::new(None)),
             conversation: Arc::new(Mutex::new(None)),
+            session_id: Arc::new(Mutex::new(None)),
+            trace_id: Arc::new(Mutex::new(None)),
+            generation_span_id: Arc::new(Mutex::new(None)),
             is_logged_in: Arc::new(AtomicBool::new(false)),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(MAX_EVENTS_PER_MINUTE))),
         }
@@ -105,6 +122,84 @@ impl Tracker {
         self.dispatch(EventKind::Login(id)).await.ok();
     }
 
+    /// Begin a new trace for the current conversation turn.
+    ///
+    /// All subsequent [`dispatch`] calls will share the same `$trace_id` in
+    /// PostHog, grouping prompt, tool-call, and error events into a single AI
+    /// observability trace.
+    ///
+    /// When `session_id` is provided it is stored as the `$ai_session_id` for
+    /// every event in this trace.
+    pub async fn begin_trace<S: Into<String>>(&self, session_id: Option<S>) {
+        *self.trace_id.lock().await = Some(Uuid::new_v4().to_string());
+        *self.session_id.lock().await = session_id.map(|s| s.into());
+        *self.generation_span_id.lock().await = None;
+    }
+
+    /// End the current trace, clear all shared IDs, and send a final
+    /// `$ai_trace` summary event to PostHog.
+    /// Subsequent [`dispatch`] calls will generate new trace IDs until
+    /// [`begin_trace`](Tracker::begin_trace) is called again.
+    pub async fn end_trace(&self) {
+        // Snapshot the trace_id before we clear it so the `$ai_trace` event
+        // carries the correct identifier.
+        let trace_id = { self.trace_id.lock().await.clone() };
+        let session_id = { self.session_id.lock().await.clone() };
+
+        *self.session_id.lock().await = None;
+        *self.trace_id.lock().await = None;
+        *self.generation_span_id.lock().await = None;
+
+        // Send the $ai_trace summary event.
+        if let Some(tid) = trace_id {
+            self.dispatch_trace_summary(tid, session_id).await.ok();
+        }
+    }
+
+    /// Dispatches a `$ai_trace` event that summarises the completed agent run.
+    async fn dispatch_trace_summary(
+        &self,
+        trace_id: String,
+        session_id: Option<String>,
+    ) -> Result<()> {
+        if !self.can_track || !self.rate_limiter.lock().await.inc_and_check() {
+            return Ok(());
+        }
+
+        let event = Event {
+            event_name: "ai_trace".to_string().into(),
+            event_value: String::new(),
+            start_time: self.start_time,
+            cores: cores(),
+            client_id: client_id(),
+            os_name: os_name(),
+            up_time: up_time(self.start_time),
+            args: args(),
+            path: path(),
+            cwd: cwd(),
+            user: user(),
+            version: version(),
+            email: vec![],
+            model: None,
+            conversation: None,
+            identity: None,
+            session_id,
+            trace_id: Some(trace_id),
+            ai_span_id: None,
+            ai_parent_id: None,
+            provider: None,
+            ai_input_tokens: None,
+            ai_output_tokens: None,
+            ai_total_tokens: None,
+            ai_latency: None,
+        };
+
+        for collector in self.collectors.as_ref() {
+            collector.collect(event.clone()).await?;
+        }
+        Ok(())
+    }
+
     pub async fn dispatch(&self, event_kind: EventKind) -> Result<()> {
         if !self.can_track {
             return Ok(());
@@ -114,8 +209,27 @@ impl Tracker {
             return Ok(()); // Drop event if rate limit exceeded
         }
 
+        // Derive span parent-child wiring based on event kind.
+        let (ai_span_id, ai_parent_id) = match event_kind {
+            // A generation (prompt) gets a fresh span_id; it has no parent.
+            EventKind::Prompt(_) => (Some(Uuid::new_v4().to_string()), None),
+            // Tool calls are children of the most recent generation.
+            EventKind::ToolCall(_) => {
+                let span = Uuid::new_v4().to_string();
+                let parent = self.generation_span_id.lock().await.clone();
+                (Some(span), parent)
+            }
+            _ => (None, None),
+        };
+
+        // Persist the generation span for subsequent tool-call parenting.
+        if matches!(event_kind, EventKind::Prompt(_)) {
+            *self.generation_span_id.lock().await = ai_span_id.clone();
+        }
+
         // Create a new event
         let email = self.system_info().await;
+        let conversation = self.conversation.lock().await.clone();
         let event = Event {
             event_name: event_kind.name(),
             event_value: event_kind.value(),
@@ -131,11 +245,26 @@ impl Tracker {
             version: version(),
             email: email.clone(),
             model: self.model.lock().await.clone(),
-            conversation: self.conversation().await,
+            conversation,
             identity: match event_kind {
                 EventKind::Login(id) => Some(id),
                 _ => None,
             },
+            session_id: self.session_id.lock().await.clone(),
+            trace_id: Some(
+                self.trace_id
+                    .lock()
+                    .await
+                    .clone()
+                    .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            ),
+            ai_span_id,
+            ai_parent_id,
+            provider: None,
+            ai_input_tokens: None,
+            ai_output_tokens: None,
+            ai_total_tokens: None,
+            ai_latency: None,
         };
 
         // Dispatch the event to all collectors
@@ -153,12 +282,6 @@ impl Tracker {
         guard.clone().unwrap_or_default()
     }
 
-    async fn conversation(&self) -> Option<Conversation> {
-        let mut guard = self.conversation.lock().await;
-        let conversation = guard.clone();
-        *guard = None;
-        conversation
-    }
     pub async fn set_conversation(&self, conversation: Conversation) {
         *self.conversation.lock().await = Some(conversation);
     }
@@ -239,7 +362,9 @@ fn up_time(start_time: DateTime<Utc>) -> i64 {
     current_time.signed_duration_since(start_time).num_minutes()
 }
 
-fn version() -> String {
+/// Exposed so the PostHog collector can stamp `$ai_lib_version` on every
+/// event.
+pub fn version() -> String {
     VERSION.to_string()
 }
 

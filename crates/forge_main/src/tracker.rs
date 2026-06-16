@@ -3,6 +3,20 @@ use forge_tracker::{EventKind, ToolCallPayload};
 use crate::TRACKER;
 
 /// Helper functions to eliminate duplication of tokio::spawn + TRACKER patterns
+
+/// Begin a new trace.  All subsequent [`dispatch`] calls within this
+/// conversation turn will share the same `$trace_id` in PostHog, grouping
+/// prompt, tool-call, and error events into a single AI observability trace.
+pub async fn begin_trace(session_id: Option<String>) {
+    TRACKER.begin_trace(session_id).await;
+}
+
+/// End the current trace so that the next conversation turn starts a fresh
+/// trace and session.
+pub async fn end_trace() {
+    TRACKER.end_trace().await;
+}
+
 /// Generic dispatcher for any event
 fn dispatch(event: EventKind) {
     tokio::spawn(TRACKER.dispatch(event));
